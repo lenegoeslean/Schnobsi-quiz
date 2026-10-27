@@ -239,8 +239,10 @@ h3 { font-size: 16px; font-weight: 700; margin-bottom: 12px; }
   padding: 12px 18px; border-radius: 99px; font-weight: 700; font-size: 15px;
   box-shadow: 0 10px 30px rgba(0,0,0,.25); transition: transform .3s cubic-bezier(.2, .9, .3, 1);
   max-width: calc(100vw - 32px); text-align: center;
+  opacity: 0; visibility: hidden;
+  transition: transform .3s cubic-bezier(.2, .9, .3, 1), opacity .2s, visibility .3s;
 }
-.toast.show { transform: translate(-50%, 0); }
+.toast.show { transform: translate(-50%, 0); opacity: 1; visibility: visible; }
 #confetti { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 25; }
 
 /* ---------- Animationen ---------- */
@@ -249,3 +251,63 @@ h3 { font-size: 16px; font-weight: 700; margin-bottom: 12px; }
 .slide { animation: slide .35s ease; }
 @keyframes slide { from { opacity: 0; transform: translateY(10px); } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* ---------- v2: Fragenanzahl, Kategorien, Regeln ---------- */
+.presets { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.preset {
+  border: 2px solid var(--line); background: var(--bg); border-radius: 14px; padding: 12px 0;
+  font-weight: 800; font-size: 18px; transition: all .15s;
+}
+.preset.on { border-color: var(--accent); background: var(--accent); color: var(--on-accent, #fff); }
+.setting.fine { border-top: 0; padding: 12px 0 0; }
+.summary { margin-top: 12px; padding: 12px 14px; border-radius: 14px; background: var(--bg); font-size: 15px; line-height: 1.5; }
+.collapse { width: 100%; border: 0; background: none; padding: 0; text-align: left; }
+.collapse h3 { margin: 0; }
+.cats { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.catchip {
+  border: 2px solid var(--line); background: var(--bg); border-radius: 99px; padding: 8px 12px;
+  font-weight: 600; font-size: 14px; transition: all .15s;
+}
+.catchip.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--card)); color: var(--accent); }
+.seg { display: flex; background: var(--bg); border-radius: 12px; padding: 3px; gap: 2px; flex: none; }
+.seg button { border: 0; background: none; border-radius: 9px; padding: 7px 9px; font-weight: 700; font-size: 13px; }
+.seg button.on { background: var(--card); color: var(--accent); box-shadow: 0 1px 4px rgba(0,0,0,.12); }
+
+/* Timer */
+.timer { display: flex; align-items: center; gap: 10px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.timer .tbar { flex: 1; height: 10px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.timer #timerBar { height: 100%; width: 100%; border-radius: 99px; background: var(--ok); transition: width .2s linear, background .3s; }
+.timer span { min-width: 54px; text-align: right; }
+.timer.warn #timerBar { background: #ffb020; }
+.timer.warn span { color: #e08a00; animation: pulse .5s ease infinite alternate; }
+.timer.over span { color: var(--no); min-width: auto; }
+.timer.over #timerBar { background: var(--no); }
+@keyframes pulse { to { transform: scale(1.15); } }
+
+/* Finale */
+.final-badge {
+  font-weight: 800; font-size: 14px; color: #8a5a00; padding: 8px 14px; border-radius: 99px;
+  background: linear-gradient(135deg, #ffe08a, #ffc24d); box-shadow: 0 6px 18px rgba(255, 176, 32, .35);
+  animation: pulse 1s ease infinite alternate;
+}
+.pill.gold { background: #ffe08a; color: #8a5a00; }
+.is-final .qcard { border-top-color: #ffc24d; }
+
+/* Klauen */
+.steal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; width: 100%; }
+.steal-btn {
+  border: 2px solid var(--line); background: var(--card); border-radius: 18px; padding: 12px 6px;
+  display: flex; flex-direction: column; align-items: center; gap: 6px; box-shadow: var(--shadow);
+  transition: transform .12s;
+}
+.steal-btn:active { transform: scale(.95); border-color: var(--pc); }
+.steal-btn strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+
+/* Auszeichnungen */
+.awards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.award {
+  background: var(--card); border-radius: 18px; padding: 12px; box-shadow: var(--shadow);
+  display: flex; flex-direction: column; gap: 2px; animation: rise .6s ease both;
+}
+.award .aic { font-size: 24px; }
+.award strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -1,6 +1,6 @@
 // Schnobbis Quiz – Service Worker
 // Bei Änderungen an der App: Versionsnummer erhöhen.
-const CACHE = 'schnobbis-quiz-v1';
+const CACHE = 'schnobbis-quiz-v2';
 const ASSETS = [
   './',
   './index.html',

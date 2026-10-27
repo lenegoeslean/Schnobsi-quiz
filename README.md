@@ -17,8 +17,13 @@ Allgemeinwissen-Quiz für den Spieleabend – als App fürs Handy (PWA).
 - **Klassik:** Jeder bekommt reihum eine Frage. Lösung aufdecken → ✅ oder ❌.
 - **Duell:** Zwei Spieler bekommen je eine vergleichbare Frage zum gleichen Thema.
   Ist nur einer richtig, gibt's +1 Extrapunkt.
+- **Fragen pro Spieler:** Schnellwahl 3 / 5 / 10 / 15 / 20 oder feinjustieren bis 50.
+- **🏷️ Kategorien:** nur bestimmte Themen spielen (Klassik).
+- **⏱️ Timer:** optional 15 / 30 / 60 Sekunden pro Frage.
 - **🃏 Joker:** tauscht die Frage, bevor die Lösung aufgedeckt wird.
 - **🔥 Serien-Bonus:** alle 3 richtigen Antworten am Stück +1.
+- **🫳 Klauen:** Antwort falsch? Wer es wusste, bekommt den Punkt.
+- **🎉 Finale:** die letzte Runde zählt doppelt.
 - **Punktestand antippen:** Punkte von Hand korrigieren, Rückgängig, Spiel beenden.
 - Der Spielstand wird automatisch gespeichert – App schließen und später weiterspielen geht.
 - Gespielte Fragen kommen erst wieder, wenn alle durch sind (oder auf der Startseite zurücksetzen).
@@ -28,8 +33,8 @@ Allgemeinwissen-Quiz für den Spieleabend – als App fürs Handy (PWA).
 In `questions.js` unten in der Liste eine Zeile anhängen, z. B.:
 
 ```js
-[121, 'Wie heißt die Hauptstadt von Island?', 'Reykjavík', 'Geografie'],
+[261, 'Wie heißt die Hauptstadt von Irland?', 'Dublin', 'Geografie'],
 ```
 
-Für neue Duell-Paare zwei Fragen anlegen und unter `PAIRS` eintragen.
-Danach in `sw.js` die Versionsnummer (`schnobbis-quiz-v1` → `v2`) erhöhen.
+Für neue Duell-Paare zwei Fragen anlegen und unter `PAIRS` eintragen: `[41, 'Thema', 261, 262],`
+Danach in `sw.js` die Versionsnummer (`schnobbis-quiz-v2` → `v3`) erhöhen.

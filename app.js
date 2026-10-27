@@ -12,6 +12,8 @@ const LS = {
 };
 const EMOJIS = ['🦊','🐼','🐸','🦁','🐙','🐧','🦄','🐯','🐨','🐵','🦉','🐢','🐷','🐰','🦖','🐳'];
 const COLORS = ['#ff8fab','#7cc6fe','#7ddc8a','#ffc94d','#b79cff','#ff9f68','#4fd6c4','#f39be8','#8fa8ff','#ffb48a','#a8d672','#ff8a8a'];
+const PRESETS = [3, 5, 10, 15, 20];
+const TIMERS = [0, 15, 30, 60];
 
 const QMAP = Object.fromEntries(QUESTIONS.map(q => [q.id, q]));
 const PMAP = Object.fromEntries(PAIRS.map(p => [p.id, p]));
@@ -24,39 +26,92 @@ function buzz(ms) { try { navigator.vibrate && navigator.vibrate(ms); } catch (e
 
 let game = load(LS.game, null);
 let players = load(LS.players, []);
-let setup = Object.assign({ mode: 'klassik', perPlayer: 5, streakBonus: true, jokers: 1 }, load(LS.settings, {}));
+let setup = Object.assign(
+  { mode: 'klassik', perPlayer: 5, streakBonus: true, jokers: 1, cats: [], timer: 0, steal: true, finale: true, sound: true },
+  load(LS.settings, {})
+);
 let view = 'home';
 let lastView = null;
+let catsOpen = false;
 
 function saveGame() { save(LS.game, game); }
 function saveSetup() { save(LS.players, players); save(LS.settings, setup); }
 
+/* ---------- Sound (kleine Töne, ohne Dateien) ---------- */
+let actx = null;
+function tone(freqs, dur = 0.12, type = 'sine', gap = 0.09) {
+  if (!setup.sound) return;
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === 'suspended') actx.resume();
+    freqs.forEach((f, i) => {
+      const o = actx.createOscillator(), g = actx.createGain();
+      const t0 = actx.currentTime + i * gap;
+      o.type = type; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.18, t0 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      o.connect(g).connect(actx.destination);
+      o.start(t0); o.stop(t0 + dur + 0.02);
+    });
+  } catch (e) {}
+}
+const sfx = {
+  ok: () => tone([660, 880], 0.14),
+  no: () => tone([300, 220], 0.18, 'triangle', 0.12),
+  bonus: () => tone([660, 880, 1100, 1320], 0.12, 'sine', 0.07),
+  tick: () => tone([880], 0.05, 'square'),
+  timeup: () => tone([440, 330, 220], 0.2, 'sawtooth', 0.14),
+  win: () => tone([523, 659, 784, 1046, 784, 1046], 0.16, 'triangle', 0.12),
+};
+
+/* ---------- Bildschirm wach halten ---------- */
+let wakeLock = null;
+async function keepAwake(on) {
+  try {
+    if (on && !wakeLock && 'wakeLock' in navigator) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } else if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; }
+  } catch (e) { wakeLock = null; }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && view === 'play') keepAwake(true);
+});
+
 /* ---------- Fragen ziehen (ohne Wiederholung über mehrere Spiele) ---------- */
 function getUsed() { const u = load(LS.used, {}); return { klassik: u.klassik || [], duell: u.duell || [] }; }
-function pick(pool, count, exclude = []) {
+function klassikIds(cats) {
+  return QUESTIONS.filter(q => !cats || !cats.length || cats.includes(q.c)).map(q => q.id);
+}
+function pick(pool, count, exclude = [], cats = []) {
   const used = getUsed();
-  const all = (pool === 'duell' ? PAIRS : QUESTIONS).map(x => x.id);
+  const all = pool === 'duell' ? PAIRS.map(p => p.id) : klassikIds(cats);
   let avail = all.filter(id => !used[pool].includes(id) && !exclude.includes(id));
-  if (avail.length < count) { used[pool] = []; avail = all.filter(id => !exclude.includes(id)); }
+  if (avail.length < count) {
+    // Pool (für diese Auswahl) aufgebraucht → diese Fragen wieder freigeben
+    used[pool] = used[pool].filter(id => !all.includes(id));
+    avail = all.filter(id => !exclude.includes(id));
+  }
   const out = []; let bag = shuffle(avail);
   while (out.length < count) { if (!bag.length) bag = shuffle(all); out.push(bag.shift()); }
   used[pool] = [...new Set([...used[pool], ...out])];
   save(LS.used, used);
   return out;
 }
-function unplayed(pool) {
+function unplayed(pool, cats) {
   const used = getUsed()[pool];
-  const all = pool === 'duell' ? PAIRS : QUESTIONS;
-  return all.filter(x => !used.includes(x.id)).length;
+  const all = pool === 'duell' ? PAIRS.map(p => p.id) : klassikIds(cats);
+  return all.filter(id => !used.includes(id)).length;
 }
 
 /* ---------- Spiel anlegen ---------- */
 function newGame() {
-  const ps = players.map(p => ({ ...p, score: 0, correct: 0, answered: 0, streak: 0, best: 0, jokers: setup.jokers, duelsWon: 0 }));
+  const ps = players.map(p => ({ ...p, score: 0, correct: 0, answered: 0, streak: 0, best: 0, jokers: setup.jokers, duelsWon: 0, steals: 0 }));
   const n = ps.length;
   const turns = [];
   if (setup.mode === 'klassik') {
-    const qs = pick('klassik', n * setup.perPlayer);
+    const qs = pick('klassik', n * setup.perPlayer, [], setup.cats);
     for (let r = 0; r < setup.perPlayer; r++)
       for (let i = 0; i < n; i++) turns.push({ p: i, q: qs[r * n + i], res: null });
   } else {
@@ -66,18 +121,28 @@ function newGame() {
       const pr = PMAP[pairs[k]];
       const sw = Math.random() < 0.5;
       const a = (2 * k) % n, b = (2 * k + 1) % n;
-      turns.push({ p: a, q: sw ? pr.b : pr.a, res: null, duel: k, side: 0 });
-      turns.push({ p: b, q: sw ? pr.a : pr.b, res: null, duel: k, side: 1 });
+      turns.push({ p: a, q: sw ? pr.b : pr.a, res: null, duel: k, side: 0, pair: pr.id });
+      turns.push({ p: b, q: sw ? pr.a : pr.b, res: null, duel: k, side: 1, pair: pr.id });
     }
   }
   game = {
     mode: setup.mode, streakBonus: setup.streakBonus, perPlayer: setup.perPlayer, jokersStart: setup.jokers,
-    players: ps, turns, idx: 0, phase: 'intro', history: [], finished: false, started: Date.now(),
+    cats: setup.cats.slice(), timer: setup.timer, steal: setup.steal && n > 1, finale: setup.finale,
+    players: ps, turns, idx: 0, phase: 'intro', history: [], finished: false, started: Date.now(), qStart: 0,
   };
   saveGame();
   view = 'play';
   render();
 }
+
+function isFinal(i = game.idx) {
+  if (!game.finale) return false;
+  const t = game.turns[i];
+  if (!t) return false;
+  if (t.duel !== undefined) return t.duel === game.turns[game.turns.length - 1].duel;
+  return i >= game.turns.length - game.players.length;
+}
+function pointsFor(i = game.idx) { return isFinal(i) ? 2 : 1; }
 
 /* ---------- Rückgängig ---------- */
 function snapshot() {
@@ -90,6 +155,7 @@ function undo() {
   const h = game.history;
   const prev = JSON.parse(h.pop());
   game = { ...prev, history: h };
+  if (game.phase === 'question') game.qStart = Date.now();
   saveGame();
   view = 'play';
   closeSheet();
@@ -100,16 +166,17 @@ function undo() {
 /* ---------- Spielzüge ---------- */
 const curTurn = () => game.turns[game.idx];
 
+function showQuestion() { game.phase = 'question'; game.qStart = Date.now(); saveGame(); render(); }
 function reveal() { game.phase = 'revealed'; saveGame(); render(); }
-function showQuestion() { game.phase = 'question'; saveGame(); render(); }
 
 function useJoker() {
   const t = curTurn(), p = game.players[t.p];
   if (p.jokers <= 0 || game.phase !== 'question') return;
   snapshot();
   const inGame = game.turns.map(x => x.q);
-  const [nq] = pick('klassik', 1, inGame);
+  const [nq] = pick('klassik', 1, inGame, game.cats);
   t.q = nq; t.joker = true; p.jokers--;
+  game.qStart = Date.now();
   saveGame(); render();
   toast('🃏 Joker! Neue Frage für ' + p.name);
 }
@@ -117,15 +184,17 @@ function useJoker() {
 function judge(ok) {
   snapshot();
   const t = curTurn(), p = game.players[t.p];
+  const pts = pointsFor();
   t.res = ok ? 'ok' : 'no';
   p.answered++;
   let msg = null;
   if (ok) {
-    p.score++; p.correct++; p.streak++; p.best = Math.max(p.best, p.streak);
+    p.score += pts; p.correct++; p.streak++; p.best = Math.max(p.best, p.streak);
     if (game.streakBonus && p.streak % 3 === 0) { p.score++; t.bonus = 1; msg = `🔥 ${p.name}: ${p.streak}er-Serie! +1 Bonus`; }
+    msg ? sfx.bonus() : sfx.ok();
     buzz(30);
   } else {
-    p.streak = 0; buzz([20, 60, 20]);
+    p.streak = 0; sfx.no(); buzz([20, 60, 20]);
   }
   if (t.duel !== undefined && t.side === 1) {
     const t0 = game.turns[game.idx - 1];
@@ -133,6 +202,8 @@ function judge(ok) {
     if (t0.res === 'ok' && t.res !== 'ok') { p0.score++; p0.duelsWon++; t0.duelBonus = 1; }
     else if (t.res === 'ok' && t0.res !== 'ok') { p.score++; p.duelsWon++; t.duelBonus = 1; }
     game.phase = 'duelResult';
+  } else if (!ok && game.steal && t.duel === undefined) {
+    game.phase = 'steal';
   } else {
     advance();
   }
@@ -140,17 +211,53 @@ function judge(ok) {
   if (msg) toast(msg);
 }
 
+function steal(i) {
+  snapshot();
+  const t = curTurn();
+  if (i >= 0) {
+    const pts = pointsFor();
+    game.players[i].score += pts; game.players[i].steals++;
+    t.stolenBy = i;
+    sfx.ok();
+    toast(`🫳 ${game.players[i].name} klaut ${pts === 2 ? '2 Punkte' : 'den Punkt'}!`);
+  }
+  advance(); saveGame(); render();
+}
+
 function advance() {
   game.idx++;
   game.phase = 'intro';
-  if (game.idx >= game.turns.length) { game.finished = true; view = 'end'; }
+  if (game.idx >= game.turns.length) { game.finished = true; view = 'end'; sfx.win(); }
 }
 function nextAfterDuel() { snapshot(); advance(); saveGame(); render(); }
 
 function adjustScore(i, d) { snapshot(); game.players[i].score += d; saveGame(); renderSheet(); render(); }
 function endEarly() {
   if (!confirm('Spiel jetzt beenden und Ergebnis zeigen?')) return;
-  snapshot(); game.finished = true; view = 'end'; saveGame(); closeSheet(); render();
+  snapshot(); game.finished = true; view = 'end'; saveGame(); closeSheet(); render(); sfx.win();
+}
+
+/* ---------- Timer ---------- */
+let timerInt = null;
+function stopTimer() { clearInterval(timerInt); timerInt = null; }
+function startTimer() {
+  stopTimer();
+  if (!game || !game.timer || game.phase !== 'question') return;
+  let lastSec = null;
+  const update = () => {
+    const bar = document.getElementById('timerBar'), num = document.getElementById('timerNum'), box = document.getElementById('timer');
+    if (!bar) return stopTimer();
+    const left = Math.max(0, game.timer - (Date.now() - game.qStart) / 1000);
+    const sec = Math.ceil(left);
+    bar.style.width = (left / game.timer * 100) + '%';
+    num.textContent = left > 0 ? sec + ' s' : '⏰ Zeit um!';
+    box.classList.toggle('warn', left > 0 && left <= 5);
+    if (left > 0 && left <= 5 && sec !== lastSec) sfx.tick();
+    lastSec = sec;
+    if (left <= 0) { box.classList.add('over'); sfx.timeup(); buzz([200, 80, 200]); stopTimer(); }
+  };
+  update();
+  timerInt = setInterval(update, 200);
 }
 
 /* ---------- Spieler-Setup ---------- */
@@ -176,6 +283,16 @@ function movePlayer(i, d) {
   [players[i], players[j]] = [players[j], players[i]];
   saveSetup(); render();
 }
+function toggleCat(c) {
+  if (c === '*') setup.cats = [];
+  else {
+    const s = new Set(setup.cats);
+    s.has(c) ? s.delete(c) : s.add(c);
+    setup.cats = [...s];
+    if (setup.cats.length === CATEGORIES.length) setup.cats = [];
+  }
+  saveSetup(); render();
+}
 
 /* ============ RENDER ============ */
 function avatar(p, size = '') {
@@ -184,13 +301,17 @@ function avatar(p, size = '') {
 
 function render() {
   if (view === 'play' && (!game || game.finished)) view = game && game.finished ? 'end' : 'home';
+  const y = view === lastView && view === 'setup' ? window.scrollY : 0;
   const fn = { home: renderHome, setup: renderSetup, play: renderPlay, end: renderEnd }[view];
+  stopTimer();
   $app.innerHTML = fn();
   $app.dataset.view = view;
   if (view === 'end' && lastView !== 'end') confetti();
   else if (view !== 'end') stopConfetti();
+  keepAwake(view === 'play');
+  if (view === 'play') startTimer();
   lastView = view;
-  window.scrollTo(0, 0);
+  window.scrollTo(0, y);
 }
 
 function renderHome() {
@@ -216,7 +337,7 @@ function renderHome() {
       </div>` : ''}
     <button class="btn ${running ? 'ghost' : 'primary big'}" data-a="toSetup">✨ Neues Spiel</button>
     <div class="card pool">
-      <div class="row-between"><span>🎯 Klassik-Fragen ungespielt</span><strong>${unplayed('klassik')} / ${QUESTIONS.length}</strong></div>
+      <div class="row-between"><span>🎯 Fragen ungespielt</span><strong>${unplayed('klassik')} / ${QUESTIONS.length}</strong></div>
       <div class="row-between"><span>⚔️ Duell-Paare ungespielt</span><strong>${unplayed('duell')} / ${PAIRS.length}</strong></div>
       <button class="link" data-a="resetPool">Gespielte Fragen zurücksetzen</button>
     </div>
@@ -227,7 +348,12 @@ function renderSetup() {
   const n = players.length;
   const duelOk = n >= 2;
   if (!duelOk && setup.mode === 'duell') setup.mode = 'klassik';
-  const total = setup.mode === 'klassik' ? n * setup.perPlayer : Math.ceil(n * setup.perPlayer / 2) * 2;
+  const isK = setup.mode === 'klassik';
+  const total = isK ? n * setup.perPlayer : Math.ceil(n * setup.perPlayer / 2) * 2;
+  const poolSize = isK ? klassikIds(setup.cats).length : PAIRS.length * 2;
+  const fresh = isK ? unplayed('klassik', setup.cats) : unplayed('duell') * 2;
+  const catLabel = setup.cats.length ? `${setup.cats.length} ausgewählt` : 'Alle';
+  const mins = Math.max(1, Math.round(total * 0.6));
   return `
   <div class="screen setup">
     <header class="topbar"><button class="icon-btn" data-a="home">‹</button><h2>Neues Spiel</h2><span></span></header>
@@ -256,28 +382,65 @@ function renderSetup() {
     <section class="card">
       <h3>🎮 Spielmodus</h3>
       <div class="modes">
-        <button class="mode ${setup.mode === 'klassik' ? 'on' : ''}" data-a="mode" data-v="klassik">
+        <button class="mode ${isK ? 'on' : ''}" data-a="mode" data-v="klassik">
           <span class="mi">🎯</span><strong>Klassik</strong><span class="muted small">Jeder bekommt reihum eine eigene Frage</span>
         </button>
-        <button class="mode ${setup.mode === 'duell' ? 'on' : ''}" data-a="mode" data-v="duell" ${duelOk ? '' : 'disabled'}>
+        <button class="mode ${!isK ? 'on' : ''}" data-a="mode" data-v="duell" ${duelOk ? '' : 'disabled'}>
           <span class="mi">⚔️</span><strong>Duell</strong><span class="muted small">${duelOk ? 'Zwei Spieler, zwei vergleichbare Fragen. Nur einer richtig = +1 Extrapunkt' : 'Ab 2 Spielern'}</span>
         </button>
       </div>
     </section>
 
     <section class="card">
-      <h3>⚙️ Einstellungen</h3>
-      <div class="setting">
-        <div><strong>Fragen pro Spieler</strong></div>
+      <h3>❓ Fragen pro Spieler</h3>
+      <div class="presets">
+        ${PRESETS.map(v => `<button class="preset ${setup.perPlayer === v ? 'on' : ''}" data-a="ppSet" data-v="${v}">${v}</button>`).join('')}
+      </div>
+      <div class="setting fine">
+        <div class="muted small">Feinjustieren</div>
         <div class="stepper"><button data-a="pp" data-v="-1">−</button><span>${setup.perPlayer}</span><button data-a="pp" data-v="1">＋</button></div>
+      </div>
+      ${n ? `<p class="summary">= <strong>${total} Fragen</strong> insgesamt · ca. ${mins} Min.${total > fresh ? `<br><span class="muted small">Davon ${Math.min(fresh, total)} noch ungespielt – danach kommen schon gespielte wieder dran.</span>` : ''}</p>` : ''}
+    </section>
+
+    ${isK ? `
+    <section class="card">
+      <button class="row-between collapse" data-a="cats">
+        <h3>🏷️ Kategorien</h3>
+        <span class="muted small">${catLabel} · ${poolSize} Fragen ${catsOpen ? '▲' : '▼'}</span>
+      </button>
+      ${catsOpen ? `
+      <div class="cats">
+        <button class="catchip ${!setup.cats.length ? 'on' : ''}" data-a="cat" data-v="*">✨ Alle</button>
+        ${CATEGORIES.map(c => `<button class="catchip ${setup.cats.includes(c) ? 'on' : ''}" data-a="cat" data-v="${esc(c)}">${CAT_ICONS[c]} ${esc(c)}</button>`).join('')}
+      </div>` : ''}
+    </section>` : ''}
+
+    <section class="card">
+      <h3>⚙️ Spielregeln</h3>
+      <div class="setting">
+        <div><strong>⏱️ Antwort-Timer</strong><div class="muted small">Countdown pro Frage</div></div>
+        <div class="seg">${TIMERS.map(v => `<button class="${setup.timer === v ? 'on' : ''}" data-a="timer" data-v="${v}">${v ? v + 's' : 'Aus'}</button>`).join('')}</div>
       </div>
       <div class="setting">
         <div><strong>🃏 Joker pro Spieler</strong><div class="muted small">Frage tauschen, ohne Punktverlust</div></div>
         <div class="stepper"><button data-a="jk" data-v="-1">−</button><span>${setup.jokers}</span><button data-a="jk" data-v="1">＋</button></div>
       </div>
       <div class="setting">
-        <div><strong>🔥 Serien-Bonus</strong><div class="muted small">Alle 3 richtigen Antworten am Stück +1</div></div>
-        <button class="switch ${setup.streakBonus ? 'on' : ''}" data-a="streak" aria-label="Serien-Bonus"><span></span></button>
+        <div><strong>🔥 Serien-Bonus</strong><div class="muted small">Alle 3 richtigen am Stück +1</div></div>
+        ${sw('streakBonus', setup.streakBonus)}
+      </div>
+      ${isK ? `<div class="setting">
+        <div><strong>🫳 Klauen</strong><div class="muted small">Falsch? Wer es wusste, schnappt sich den Punkt</div></div>
+        ${sw('steal', setup.steal)}
+      </div>` : ''}
+      <div class="setting">
+        <div><strong>🎉 Finale</strong><div class="muted small">Letzte Runde zählt doppelt</div></div>
+        ${sw('finale', setup.finale)}
+      </div>
+      <div class="setting">
+        <div><strong>🔊 Sounds</strong></div>
+        ${sw('sound', setup.sound)}
       </div>
     </section>
 
@@ -286,6 +449,7 @@ function renderSetup() {
     </div>
   </div>`;
 }
+function sw(key, on) { return `<button class="switch ${on ? 'on' : ''}" data-a="toggle" data-v="${key}" aria-label="${key}"><span></span></button>`; }
 
 function scoreStrip() {
   const t = curTurn();
@@ -299,9 +463,13 @@ function renderPlay() {
   const p = game.players[t.p];
   const q = QMAP[t.q];
   const isDuel = t.duel !== undefined;
+  const pair = isDuel ? PMAP[t.pair] : null;
+  const topic = pair && !t.joker ? pair.t : q.c;
   const totalDuels = isDuel ? game.turns.length / 2 : 0;
   const prog = isDuel ? `Duell ${t.duel + 1} / ${totalDuels}` : `Frage ${game.idx + 1} / ${game.turns.length}`;
   const pct = Math.round(game.idx / game.turns.length * 100);
+  const fin = isFinal();
+  const finBadge = fin ? `<div class="final-badge">🎉 Finale · doppelte Punkte</div>` : '';
   let body = '';
 
   if (game.phase === 'intro') {
@@ -309,22 +477,24 @@ function renderPlay() {
       const t1 = game.turns[game.idx + 1], p1 = game.players[t1.p];
       body = `
       <div class="intro duel-intro pop">
+        ${finBadge}
         <div class="kicker">⚔️ Duell</div>
         <div class="vs">
           <div>${avatar(p, 'xl')}<strong>${esc(p.name)}</strong></div>
           <span class="vs-badge">VS</span>
           <div>${avatar(p1, 'xl')}<strong>${esc(p1.name)}</strong></div>
         </div>
-        <p class="cat-hint">Thema: <strong>${esc(q.c)}</strong></p>
+        <p class="cat-hint">Thema: <strong>${esc(topic)}</strong></p>
         <p class="muted">${esc(p.name)} fängt an</p>
         <button class="btn primary big" data-a="show">Frage zeigen</button>
       </div>`;
     } else {
       body = `
       <div class="intro pop">
+        ${finBadge}
         ${avatar(p, 'xxl')}
         <h2 class="turn-name">${esc(p.name)} ist dran!</h2>
-        ${isDuel ? `<p class="cat-hint">Gleiches Thema: <strong>${esc(q.c)}</strong></p>` : `<p class="muted">Punkte: ${p.score}${p.streak >= 2 ? ` · 🔥 Serie ${p.streak}` : ''}</p>`}
+        ${isDuel ? `<p class="cat-hint">Gleiches Thema: <strong>${esc(topic)}</strong></p>` : `<p class="muted">Punkte: ${p.score}${p.streak >= 2 ? ` · 🔥 Serie ${p.streak}` : ''}</p>`}
         <button class="btn primary big" data-a="show">Frage zeigen</button>
       </div>`;
     }
@@ -332,9 +502,10 @@ function renderPlay() {
     const revealed = game.phase === 'revealed';
     body = `
     <div class="qwrap">
-      <div class="who">${avatar(p, 'sm')}<strong>${esc(p.name)}</strong>${p.streak >= 2 ? `<span class="pill fire">🔥 ${p.streak}</span>` : ''}</div>
-      <div class="qcard ${revealed ? 'flipped' : ''}">
-        <span class="cat">${esc(q.c)}</span>
+      <div class="who">${avatar(p, 'sm')}<strong>${esc(p.name)}</strong>${p.streak >= 2 ? `<span class="pill fire">🔥 ${p.streak}</span>` : ''}${fin ? '<span class="pill gold">×2</span>' : ''}</div>
+      ${game.timer && !revealed ? `<div class="timer" id="timer"><div class="tbar"><div id="timerBar"></div></div><span id="timerNum">${game.timer} s</span></div>` : ''}
+      <div class="qcard">
+        <span class="cat">${CAT_ICONS[q.c] || ''} ${esc(topic)}</span>
         <p class="question">${esc(q.q)}</p>
         ${revealed ? `<div class="answer slide"><span class="muted small">Lösung</span><p>${esc(q.a)}</p></div>` : ''}
       </div>
@@ -345,6 +516,19 @@ function renderPlay() {
         </div>` : `
         <button class="btn primary big" data-a="reveal">👀 Lösung zeigen</button>
         ${p.jokers > 0 ? `<button class="btn ghost" data-a="joker">🃏 Joker nutzen (${p.jokers} übrig)</button>` : ''}`}
+    </div>`;
+  } else if (game.phase === 'steal') {
+    const pts = pointsFor();
+    body = `
+    <div class="intro pop">
+      <div class="kicker">🫳 Klau-Chance</div>
+      <h2 class="turn-name">Wer wusste es?</h2>
+      <p class="muted">Lösung: <strong>${esc(q.a)}</strong></p>
+      <div class="steal-grid">
+        ${game.players.map((o, i) => i === t.p ? '' : `
+          <button class="steal-btn" data-a="steal" data-i="${i}" style="--pc:${o.color}">${avatar(o, 'lg')}<strong>${esc(o.name)}</strong><span class="muted small">+${pts}</span></button>`).join('')}
+      </div>
+      <button class="btn ghost" data-a="steal" data-i="-1">🙈 Keiner – weiter</button>
     </div>`;
   } else if (game.phase === 'duelResult') {
     const t0 = game.turns[game.idx - 1], p0 = game.players[t0.p];
@@ -365,7 +549,7 @@ function renderPlay() {
   }
 
   return `
-  <div class="screen play">
+  <div class="screen play ${fin ? 'is-final' : ''}">
     <header class="topbar">
       <button class="icon-btn" data-a="home" aria-label="Startseite">⌂</button>
       <div class="prog"><span>${prog}</span><div class="progress"><div style="width:${pct}%"></div></div></div>
@@ -379,10 +563,24 @@ function renderPlay() {
 function ranking() {
   const ps = game.players.map((p, i) => ({ ...p, i }));
   ps.sort((a, b) => b.score - a.score || b.correct - a.correct || b.best - a.best);
-  // Platzierung mit Gleichstand
   let place = 0, last = null;
   ps.forEach((p, k) => { if (p.score !== last) { place = k + 1; last = p.score; } p.place = place; });
   return ps;
+}
+
+function awards() {
+  const ps = game.players;
+  const out = [];
+  const best = Math.max(...ps.map(p => p.best));
+  if (best >= 2) out.push(['🔥', 'Längste Serie', ps.filter(p => p.best === best).map(p => p.name), `${best} am Stück`]);
+  const quote = p => p.answered ? p.correct / p.answered : 0;
+  const bq = Math.max(...ps.map(quote));
+  if (bq > 0) out.push(['🎯', 'Beste Quote', ps.filter(p => quote(p) === bq).map(p => p.name), `${Math.round(bq * 100)} %`]);
+  const bs = Math.max(...ps.map(p => p.steals || 0));
+  if (bs > 0) out.push(['🫳', 'Meisterdieb', ps.filter(p => p.steals === bs).map(p => p.name), `${bs}× geklaut`]);
+  const bd = Math.max(...ps.map(p => p.duelsWon || 0));
+  if (game.mode === 'duell' && bd > 0) out.push(['⚔️', 'Duell-König', ps.filter(p => p.duelsWon === bd).map(p => p.name), `${bd} Siege`]);
+  return out;
 }
 
 function renderEnd() {
@@ -390,6 +588,7 @@ function renderEnd() {
   const top = r.slice(0, 3);
   const order = top.length === 3 ? [top[1], top[0], top[2]] : top.length === 2 ? [top[1], top[0]] : top;
   const winners = r.filter(p => p.place === 1);
+  const aw = awards();
   return `
   <div class="screen end">
     <div class="logo-wrap">
@@ -405,6 +604,8 @@ function renderEnd() {
           <div class="block"><span>${p.place}</span><b>${p.score} P</b></div>
         </div>`).join('')}
     </div>
+    ${aw.length ? `<div class="awards">${aw.map(([ic, title, names, val]) => `
+      <div class="award"><span class="aic">${ic}</span><span class="muted small">${title}</span><strong>${esc(names.join(' & '))}</strong><span class="muted small">${val}</span></div>`).join('')}</div>` : ''}
     <section class="card">
       <h3>📊 Auswertung</h3>
       <ul class="results">
@@ -473,13 +674,14 @@ function confetti() {
   const ctx = c.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
   c.width = innerWidth * dpr; c.height = innerHeight * dpr;
-  ctx.scale(dpr, dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const cols = [getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#7c5cff', ...COLORS];
   const parts = Array.from({ length: 140 }, () => ({
     x: Math.random() * innerWidth, y: -20 - Math.random() * innerHeight * 0.6,
     w: 6 + Math.random() * 6, h: 8 + Math.random() * 8,
     vy: 2 + Math.random() * 3, vx: -1.5 + Math.random() * 3,
     r: Math.random() * Math.PI, vr: -0.2 + Math.random() * 0.4,
-    col: COLORS[Math.floor(Math.random() * COLORS.length)],
+    col: cols[Math.floor(Math.random() * cols.length)],
   }));
   let frame = 0;
   (function tick() {
@@ -512,9 +714,13 @@ document.addEventListener('click', e => {
     case 'del': players.splice(i, 1); saveSetup(); render(); break;
     case 'shufflePlayers': players = shuffle(players); saveSetup(); render(); break;
     case 'mode': setup.mode = v; saveSetup(); render(); break;
-    case 'pp': setup.perPlayer = Math.min(20, Math.max(1, setup.perPlayer + +v)); saveSetup(); render(); break;
+    case 'ppSet': setup.perPlayer = +v; saveSetup(); render(); break;
+    case 'pp': setup.perPlayer = Math.min(50, Math.max(1, setup.perPlayer + +v)); saveSetup(); render(); break;
     case 'jk': setup.jokers = Math.min(5, Math.max(0, setup.jokers + +v)); saveSetup(); render(); break;
-    case 'streak': setup.streakBonus = !setup.streakBonus; saveSetup(); render(); break;
+    case 'timer': setup.timer = +v; saveSetup(); render(); break;
+    case 'toggle': setup[v] = !setup[v]; saveSetup(); render(); if (v === 'sound' && setup.sound) sfx.ok(); break;
+    case 'cats': catsOpen = !catsOpen; render(); break;
+    case 'cat': toggleCat(v); break;
     case 'start':
       if (game && !game.finished && !confirm('Das laufende Spiel wird überschrieben. Neues Spiel starten?')) return;
       newGame(); break;
@@ -523,6 +729,7 @@ document.addEventListener('click', e => {
     case 'joker': useJoker(); break;
     case 'ok': judge(true); break;
     case 'no': judge(false); break;
+    case 'steal': steal(i); break;
     case 'nextDuel': nextAfterDuel(); break;
     case 'undo': undo(); break;
     case 'sheet': openSheet(); break;
@@ -531,7 +738,10 @@ document.addEventListener('click', e => {
     case 'endEarly': endEarly(); break;
     case 'rematch':
       players = game.players.map(({ id, name, emoji, color }) => ({ id, name, emoji, color }));
-      setup.mode = game.mode; setup.perPlayer = game.perPlayer; setup.jokers = game.jokersStart; setup.streakBonus = game.streakBonus;
+      Object.assign(setup, {
+        mode: game.mode, perPlayer: game.perPlayer, jokers: game.jokersStart, streakBonus: game.streakBonus,
+        cats: game.cats || [], timer: game.timer || 0, finale: !!game.finale, steal: game.steal ?? setup.steal,
+      });
       saveSetup(); newGame(); break;
   }
 });
@@ -541,6 +751,17 @@ document.addEventListener('submit', e => {
     addPlayer(document.getElementById('newName').value);
   }
 });
+
+// Ältere Spielstände (v1) ergänzen
+if (game) {
+  game.players.forEach(p => { p.steals = p.steals || 0; });
+  game.turns.forEach(t => {
+    if (t.duel !== undefined && !t.pair) {
+      const pr = PAIRS.find(x => x.a === t.q || x.b === t.q);
+      if (pr) t.pair = pr.id;
+    }
+  });
+}
 
 render();
 
