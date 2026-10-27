@@ -337,3 +337,25 @@ h3 { font-size: 16px; font-weight: 700; margin-bottom: 12px; }
 .deco .d-flower { width: 84px; height: 84px; right: 22px; top: 50%; opacity: .3; }
 .deco .d-flower svg { width: 100%; height: 100%; fill: var(--mauve); }
 .home .logo-wrap h1, .end .logo-wrap h1 { text-transform: uppercase; letter-spacing: .14em; font-size: 24px; }
+
+/* ---------- Schwierigkeit ---------- */
+.diff { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 800; padding: 5px 10px; border-radius: 99px; white-space: nowrap; }
+.diff.d1 { background: color-mix(in srgb, var(--blue) 16%, var(--card)); color: var(--blue); }
+.diff.d2 { background: var(--cream); color: #8a6a3e; }
+.diff.d3 { background: color-mix(in srgb, var(--mauve) 20%, var(--card)); color: var(--mauve); }
+@media (prefers-color-scheme: dark) { .diff.d2 { background: #4a4560; color: var(--cream); } }
+.qmeta { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.qmeta .cat { align-self: auto; }
+.intro-diff { display: flex; align-items: center; gap: 8px; justify-content: center; }
+.diffcount { display: flex; gap: 6px; flex-wrap: wrap; }
+.diffcount .diff b { font-weight: 800; margin-left: 2px; }
+.diffpick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.dchip {
+  border: 2px solid var(--line); background: var(--soft); border-radius: 14px; padding: 10px 4px;
+  font-weight: 700; font-size: 13px; transition: all .15s; white-space: nowrap;
+}
+.dchip.on { border-color: var(--navy); background: var(--navy); color: var(--on-dark); }
+.dchip.d1.on { border-color: var(--blue); background: var(--blue); }
+.dchip.d2.on { border-color: #e3cf9f; background: var(--cream); color: var(--navy); }
+.dchip.d3.on { border-color: var(--mauve); background: var(--mauve); }
+.diffpick + .hint { margin: 10px 0 4px; }

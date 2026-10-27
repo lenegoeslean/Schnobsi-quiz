@@ -18,6 +18,9 @@ Allgemeinwissen-Quiz für den Spieleabend – als App fürs Handy (PWA).
 - **Duell:** Zwei Spieler bekommen je eine vergleichbare Frage zum gleichen Thema.
   Ist nur einer richtig, gibt's +1 Extrapunkt.
 - **Fragen pro Spieler:** Schnellwahl 3 / 5 / 10 / 15 / 20 oder feinjustieren bis 50.
+- **📶 Schwierigkeit:** Leicht 🌱 / Mittel 🌸 / Schwer 🔥 – einzeln oder kombiniert wählbar.
+- **📈 Steigend:** es wird von Runde zu Runde schwerer, pro Runde haben alle die gleiche Stufe.
+- **💎 Schwer zählt mehr:** Leicht 1, Mittel 2, Schwer 3 Punkte (optional).
 - **🏷️ Kategorien:** nur bestimmte Themen spielen (Klassik).
 - **⏱️ Timer:** optional 15 / 30 / 60 Sekunden pro Frage.
 - **🃏 Joker:** tauscht die Frage, bevor die Lösung aufgedeckt wird.
@@ -30,11 +33,11 @@ Allgemeinwissen-Quiz für den Spieleabend – als App fürs Handy (PWA).
 
 ## Neue Fragen ergänzen
 
-In `questions.js` unten in der Liste eine Zeile anhängen, z. B.:
+In `questions.js` unten in der Liste eine Zeile anhängen – die letzte Zahl ist die Schwierigkeit (1 = Leicht, 2 = Mittel, 3 = Schwer):
 
 ```js
-[401, 'Was ist die Hauptstadt von Kroatien?', 'Zagreb', 'Geografie'],
+[501, 'Was ist die Hauptstadt von Kroatien?', 'Zagreb', 'Geografie', 2],
 ```
 
-Für neue Duell-Paare zwei Fragen anlegen und unter `PAIRS` eintragen: `[61, 'Thema', 401, 402],`
-Danach in `sw.js` die Versionsnummer (`schnobbis-quiz-v4` → `v5`) erhöhen.
+Für neue Duell-Paare zwei Fragen anlegen und unter `PAIRS` eintragen: `[71, 'Thema', 501, 502],`
+Danach in `sw.js` die Versionsnummer (`schnobbis-quiz-v5` → `v6`) erhöhen.

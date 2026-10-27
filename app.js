@@ -27,7 +27,7 @@ function buzz(ms) { try { navigator.vibrate && navigator.vibrate(ms); } catch (e
 let game = load(LS.game, null);
 let players = load(LS.players, []);
 let setup = Object.assign(
-  { mode: 'klassik', perPlayer: 5, streakBonus: true, jokers: 1, cats: [], timer: 0, steal: true, finale: true, sound: true },
+  { mode: 'klassik', perPlayer: 5, streakBonus: true, jokers: 1, cats: [], diffs: [], timer: 0, steal: true, finale: true, sound: true, diffPoints: false, rising: true },
   load(LS.settings, {})
 );
 let view = 'home';
@@ -81,12 +81,18 @@ document.addEventListener('visibilitychange', () => {
 
 /* ---------- Fragen ziehen (ohne Wiederholung über mehrere Spiele) ---------- */
 function getUsed() { const u = load(LS.used, {}); return { klassik: u.klassik || [], duell: u.duell || [] }; }
-function klassikIds(cats) {
-  return QUESTIONS.filter(q => !cats || !cats.length || cats.includes(q.c)).map(q => q.id);
+function klassikIds(cats, diffs) {
+  return QUESTIONS.filter(q => (!cats || !cats.length || cats.includes(q.c)) && (!diffs || !diffs.length || diffs.includes(q.d))).map(q => q.id);
 }
-function pick(pool, count, exclude = [], cats = []) {
+function duellIds(diffs) {
+  return PAIRS.filter(p => !diffs || !diffs.length || diffs.includes(p.d)).map(p => p.id);
+}
+function poolIds(pool, cats, diffs) { return pool === 'duell' ? duellIds(diffs) : klassikIds(cats, diffs); }
+function pick(pool, count, exclude = [], cats = [], diffs = []) {
   const used = getUsed();
-  const all = pool === 'duell' ? PAIRS.map(p => p.id) : klassikIds(cats);
+  let all = poolIds(pool, cats, diffs);
+  if (!all.length) all = poolIds(pool, cats, []);
+  if (!all.length) all = poolIds(pool, [], []);
   let avail = all.filter(id => !used[pool].includes(id) && !exclude.includes(id));
   if (avail.length < count) {
     // Pool (für diese Auswahl) aufgebraucht → diese Fragen wieder freigeben
@@ -99,24 +105,51 @@ function pick(pool, count, exclude = [], cats = []) {
   save(LS.used, used);
   return out;
 }
-function unplayed(pool, cats) {
+function unplayed(pool, cats, diffs) {
   const used = getUsed()[pool];
-  const all = pool === 'duell' ? PAIRS.map(p => p.id) : klassikIds(cats);
+  const all = poolIds(pool, cats, diffs);
   return all.filter(id => !used.includes(id)).length;
 }
 
 /* ---------- Spiel anlegen ---------- */
+function levelPlan(R) {
+  const levels = setup.diffs.length ? setup.diffs.slice().sort() : [1, 2, 3];
+  return Array.from({ length: R }, (_, r) => levels[Math.floor(r * levels.length / R)]);
+}
 function newGame() {
   const ps = players.map(p => ({ ...p, score: 0, correct: 0, answered: 0, streak: 0, best: 0, jokers: setup.jokers, duelsWon: 0, steals: 0 }));
   const n = ps.length;
   const turns = [];
   if (setup.mode === 'klassik') {
-    const qs = pick('klassik', n * setup.perPlayer, [], setup.cats);
+    const R = setup.perPlayer;
+    let qs;
+    if (setup.rising) {
+      // Steigend: Runden gleichmäßig auf die Stufen verteilen (erst leicht, dann schwerer);
+      // innerhalb einer Runde haben alle die gleiche Stufe → fair
+      const lv = levelPlan(R);
+      qs = [];
+      [1, 2, 3].forEach(d => {
+        const rounds = lv.filter(x => x === d).length;
+        if (rounds) qs.push(...pick('klassik', rounds * n, qs, setup.cats, [d]));
+      });
+    } else {
+      qs = pick('klassik', n * R, [], setup.cats, setup.diffs);
+    }
     for (let r = 0; r < setup.perPlayer; r++)
       for (let i = 0; i < n; i++) turns.push({ p: i, q: qs[r * n + i], res: null });
   } else {
     const D = Math.ceil((n * setup.perPlayer) / 2);
-    const pairs = pick('duell', D);
+    let pairs;
+    if (setup.rising) {
+      const lv = levelPlan(D);
+      pairs = [];
+      [1, 2, 3].forEach(d => {
+        const k = lv.filter(x => x === d).length;
+        if (k) pairs.push(...pick('duell', k, pairs, [], [d]));
+      });
+    } else {
+      pairs = pick('duell', D, [], [], setup.diffs);
+    }
     for (let k = 0; k < D; k++) {
       const pr = PMAP[pairs[k]];
       const sw = Math.random() < 0.5;
@@ -127,7 +160,7 @@ function newGame() {
   }
   game = {
     mode: setup.mode, streakBonus: setup.streakBonus, perPlayer: setup.perPlayer, jokersStart: setup.jokers,
-    cats: setup.cats.slice(), timer: setup.timer, steal: setup.steal && n > 1, finale: setup.finale,
+    cats: setup.cats.slice(), diffs: setup.diffs.slice(), diffPoints: setup.diffPoints, rising: setup.rising, timer: setup.timer, steal: setup.steal && n > 1, finale: setup.finale,
     players: ps, turns, idx: 0, phase: 'intro', history: [], finished: false, started: Date.now(), qStart: 0,
   };
   saveGame();
@@ -142,7 +175,9 @@ function isFinal(i = game.idx) {
   if (t.duel !== undefined) return t.duel === game.turns[game.turns.length - 1].duel;
   return i >= game.turns.length - game.players.length;
 }
-function pointsFor(i = game.idx) { return isFinal(i) ? 2 : 1; }
+function basePoints(i = game.idx) { return game.diffPoints ? QMAP[game.turns[i].q].d : 1; }
+function pointsFor(i = game.idx) { return basePoints(i) * (isFinal(i) ? 2 : 1); }
+function diffBadge(d) { const x = DIFFS[d - 1]; return `<span class="diff d${d}">${x.icon} ${x.label}</span>`; }
 
 /* ---------- Rückgängig ---------- */
 function snapshot() {
@@ -174,7 +209,7 @@ function useJoker() {
   if (p.jokers <= 0 || game.phase !== 'question') return;
   snapshot();
   const inGame = game.turns.map(x => x.q);
-  const [nq] = pick('klassik', 1, inGame, game.cats);
+  const [nq] = pick('klassik', 1, inGame, game.cats, [QMAP[t.q].d]);
   t.q = nq; t.joker = true; p.jokers--;
   game.qStart = Date.now();
   saveGame(); render();
@@ -283,6 +318,17 @@ function movePlayer(i, d) {
   [players[i], players[j]] = [players[j], players[i]];
   saveSetup(); render();
 }
+function toggleDiff(v) {
+  if (v === '*') setup.diffs = [];
+  else {
+    v = +v;
+    const st = new Set(setup.diffs);
+    st.has(v) ? st.delete(v) : st.add(v);
+    setup.diffs = [...st].sort();
+    if (setup.diffs.length === DIFFS.length) setup.diffs = [];
+  }
+  saveSetup(); render();
+}
 function toggleCat(c) {
   if (c === '*') setup.cats = [];
   else {
@@ -339,6 +385,7 @@ function renderHome() {
     <button class="btn ${running ? 'ghost' : 'primary big'}" data-a="toSetup">✨ Neues Spiel</button>
     <div class="card pool">
       <div class="row-between"><span>🎯 Fragen ungespielt</span><strong>${unplayed('klassik')} / ${QUESTIONS.length}</strong></div>
+      <div class="diffcount">${DIFFS.map(d => `<span class="diff d${d.v}">${d.icon} ${d.label} <b>${QUESTIONS.filter(q => q.d === d.v).length}</b></span>`).join('')}</div>
       <div class="row-between"><span>⚔️ Duell-Paare ungespielt</span><strong>${unplayed('duell')} / ${PAIRS.length}</strong></div>
       <button class="link" data-a="resetPool">Gespielte Fragen zurücksetzen</button>
     </div>
@@ -351,8 +398,8 @@ function renderSetup() {
   if (!duelOk && setup.mode === 'duell') setup.mode = 'klassik';
   const isK = setup.mode === 'klassik';
   const total = isK ? n * setup.perPlayer : Math.ceil(n * setup.perPlayer / 2) * 2;
-  const poolSize = isK ? klassikIds(setup.cats).length : PAIRS.length * 2;
-  const fresh = isK ? unplayed('klassik', setup.cats) : unplayed('duell') * 2;
+  const poolSize = isK ? klassikIds(setup.cats, setup.diffs).length : duellIds(setup.diffs).length * 2;
+  const fresh = isK ? unplayed('klassik', setup.cats, setup.diffs) : unplayed('duell', [], setup.diffs) * 2;
   const catLabel = setup.cats.length ? `${setup.cats.length} ausgewählt` : 'Alle';
   const mins = Math.max(1, Math.round(total * 0.6));
   return `
@@ -402,6 +449,23 @@ function renderSetup() {
         <div class="stepper"><button data-a="pp" data-v="-1">−</button><span>${setup.perPlayer}</span><button data-a="pp" data-v="1">＋</button></div>
       </div>
       ${n ? `<p class="summary">= <strong>${total} Fragen</strong> insgesamt · ca. ${mins} Min.${total > fresh ? `<br><span class="muted small">Davon ${Math.min(fresh, total)} noch ungespielt – danach kommen schon gespielte wieder dran.</span>` : ''}</p>` : ''}
+    </section>
+
+    <section class="card">
+      <h3>📶 Schwierigkeit</h3>
+      <div class="diffpick">
+        <button class="dchip ${!setup.diffs.length ? 'on' : ''}" data-a="diff" data-v="*">✨ Alle</button>
+        ${DIFFS.map(d => `<button class="dchip d${d.v} ${setup.diffs.includes(d.v) ? 'on' : ''}" data-a="diff" data-v="${d.v}">${d.icon} ${d.label}</button>`).join('')}
+      </div>
+      <p class="muted small hint">${poolSize} Fragen in dieser Auswahl${isK ? '' : ` (${poolSize / 2} Duell-Paare)`}</p>
+      <div class="setting">
+        <div><strong>📈 Steigend</strong><div class="muted small">Es wird von Runde zu Runde schwerer</div></div>
+        ${sw('rising', setup.rising)}
+      </div>
+      <div class="setting">
+        <div><strong>💎 Schwer zählt mehr</strong><div class="muted small">Leicht 1 · Mittel 2 · Schwer 3 Punkte</div></div>
+        ${sw('diffPoints', setup.diffPoints)}
+      </div>
     </section>
 
     ${isK ? `
@@ -486,6 +550,7 @@ function renderPlay() {
           <div>${avatar(p1, 'xl')}<strong>${esc(p1.name)}</strong></div>
         </div>
         <p class="cat-hint">Thema: <strong>${esc(topic)}</strong></p>
+        <p class="intro-diff">${diffBadge(pair ? pair.d : q.d)}</p>
         <p class="muted">${esc(p.name)} fängt an</p>
         <button class="btn primary big" data-a="show">Frage zeigen</button>
       </div>`;
@@ -496,6 +561,7 @@ function renderPlay() {
         ${avatar(p, 'xxl')}
         <h2 class="turn-name">${esc(p.name)} ist dran!</h2>
         ${isDuel ? `<p class="cat-hint">Gleiches Thema: <strong>${esc(topic)}</strong></p>` : `<p class="muted">Punkte: ${p.score}${p.streak >= 2 ? ` · 🔥 Serie ${p.streak}` : ''}</p>`}
+        <p class="intro-diff">${diffBadge(q.d)}${pointsFor() > 1 ? `<span class="muted small">zählt ${pointsFor()} Punkte</span>` : ''}</p>
         <button class="btn primary big" data-a="show">Frage zeigen</button>
       </div>`;
     }
@@ -503,10 +569,10 @@ function renderPlay() {
     const revealed = game.phase === 'revealed';
     body = `
     <div class="qwrap">
-      <div class="who">${avatar(p, 'sm')}<strong>${esc(p.name)}</strong>${p.streak >= 2 ? `<span class="pill fire">🔥 ${p.streak}</span>` : ''}${fin ? '<span class="pill gold">×2</span>' : ''}</div>
+      <div class="who">${avatar(p, 'sm')}<strong>${esc(p.name)}</strong>${p.streak >= 2 ? `<span class="pill fire">🔥 ${p.streak}</span>` : ''}${pointsFor() > 1 ? `<span class="pill gold">+${pointsFor()}</span>` : ''}</div>
       ${game.timer && !revealed ? `<div class="timer" id="timer"><div class="tbar"><div id="timerBar"></div></div><span id="timerNum">${game.timer} s</span></div>` : ''}
       <div class="qcard">
-        <span class="cat">${CAT_ICONS[q.c] || ''} ${esc(topic)}</span>
+        <div class="qmeta"><span class="cat">${CAT_ICONS[q.c] || ''} ${esc(topic)}</span>${diffBadge(q.d)}</div>
         <p class="question">${esc(q.q)}</p>
         ${revealed ? `<div class="answer slide"><span class="muted small">Lösung</span><p>${esc(q.a)}</p></div>` : ''}
       </div>
@@ -722,6 +788,7 @@ document.addEventListener('click', e => {
     case 'toggle': setup[v] = !setup[v]; saveSetup(); render(); if (v === 'sound' && setup.sound) sfx.ok(); break;
     case 'cats': catsOpen = !catsOpen; render(); break;
     case 'cat': toggleCat(v); break;
+    case 'diff': toggleDiff(v); break;
     case 'start':
       if (game && !game.finished && !confirm('Das laufende Spiel wird überschrieben. Neues Spiel starten?')) return;
       newGame(); break;
@@ -741,7 +808,7 @@ document.addEventListener('click', e => {
       players = game.players.map(({ id, name, emoji, color }) => ({ id, name, emoji, color }));
       Object.assign(setup, {
         mode: game.mode, perPlayer: game.perPlayer, jokers: game.jokersStart, streakBonus: game.streakBonus,
-        cats: game.cats || [], timer: game.timer || 0, finale: !!game.finale, steal: game.steal ?? setup.steal,
+        cats: game.cats || [], diffs: game.diffs || [], diffPoints: !!game.diffPoints, rising: game.rising ?? setup.rising, timer: game.timer || 0, finale: !!game.finale, steal: game.steal ?? setup.steal,
       });
       saveSetup(); newGame(); break;
   }
