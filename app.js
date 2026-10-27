@@ -11,7 +11,7 @@ const LS = {
   settings: 'sq_settings_v1',
 };
 const EMOJIS = ['🦊','🐼','🐸','🦁','🐙','🐧','🦄','🐯','🐨','🐵','🦉','🐢','🐷','🐰','🦖','🐳'];
-const COLORS = ['#ff8fab','#7cc6fe','#7ddc8a','#ffc94d','#b79cff','#ff9f68','#4fd6c4','#f39be8','#8fa8ff','#ffb48a','#a8d672','#ff8a8a'];
+const COLORS = ['#EDBABC','#598099','#BB7B85','#E8CF97','#313857','#9DBACB','#D6969E','#7C87AE','#C7A2B8','#8FAE9F','#E3A587','#6E9BB5'];
 const PRESETS = [3, 5, 10, 15, 20];
 const TIMERS = [0, 15, 30, 60];
 
@@ -319,6 +319,7 @@ function renderHome() {
   const t = running ? game.turns.length : 0;
   return `
   <div class="screen home">
+    <div class="deco"><span class="d-arch"></span><span class="d-sun"></span><span class="d-pill"></span><span class="d-flower"><svg viewBox="0 0 100 100"><path d="M50 8c9 0 15 9 14 19 9-6 21-3 24 6s-3 18-12 20c9 4 12 15 6 23s-18 8-24 1c0 10-8 17-17 15s-14-11-11-20c-7 7-19 6-23-2s0-19 9-21c-9-3-13-14-8-22s17-8 23-1C40 16 42 8 50 8z"/></svg></span></div>
     <div class="logo-wrap">
       <div class="logo">?</div>
       <h1>Schnobbis Quiz</h1>
@@ -675,7 +676,7 @@ function confetti() {
   const dpr = window.devicePixelRatio || 1;
   c.width = innerWidth * dpr; c.height = innerHeight * dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const cols = [getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#7c5cff', ...COLORS];
+  const cols = [getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#598099', ...COLORS];
   const parts = Array.from({ length: 140 }, () => ({
     x: Math.random() * innerWidth, y: -20 - Math.random() * innerHeight * 0.6,
     w: 6 + Math.random() * 6, h: 8 + Math.random() * 8,
