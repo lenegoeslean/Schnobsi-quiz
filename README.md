@@ -33,8 +33,8 @@ Allgemeinwissen-Quiz für den Spieleabend – als App fürs Handy (PWA).
 In `questions.js` unten in der Liste eine Zeile anhängen, z. B.:
 
 ```js
-[261, 'Wie heißt die Hauptstadt von Irland?', 'Dublin', 'Geografie'],
+[401, 'Was ist die Hauptstadt von Kroatien?', 'Zagreb', 'Geografie'],
 ```
 
-Für neue Duell-Paare zwei Fragen anlegen und unter `PAIRS` eintragen: `[41, 'Thema', 261, 262],`
-Danach in `sw.js` die Versionsnummer (`schnobbis-quiz-v2` → `v3`) erhöhen.
+Für neue Duell-Paare zwei Fragen anlegen und unter `PAIRS` eintragen: `[61, 'Thema', 401, 402],`
+Danach in `sw.js` die Versionsnummer (`schnobbis-quiz-v3` → `v4`) erhöhen.
